@@ -1,0 +1,201 @@
+var ssa =  {
+    _createUUID : function () {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    },
+    _makeExpiresDate : function (hour) {
+        var expires = new Date();
+        expires.setTime(new Date().getTime() + (hour * 60 * 60 * 1000));
+        return expires
+    },
+    _getCookie : function (name) {
+        var cookie = document.cookie.match('(^|;) ?_' + name + '=([^;]*)(;|$)');
+        return cookie ? decodeURI(cookie[2]) : null;
+    },
+    _addCookie: function (key, value, date) {
+        var expires = "";
+        if(date != null) {
+            expires = "; expires=" + date.toGMTString();
+        }
+        document.cookie = '_'+ key +'=' + value + "; expires=" + expires + "; path=/";
+    },
+    _getSession : function() {
+        var session = this._getCookie("session");
+        if(session == null) {
+            session = this._createUUID();
+            this._addCookie("session", session, this._makeExpiresDate(0.5))
+        }
+        return session;
+    },
+    _getUUID : function() {
+        var uuid = this._getCookie("uuid");
+        if(uuid == null) {
+            uuid = this._createUUID();
+            this._addCookie("uuid", uuid, this._makeExpiresDate(24 * 365));
+        }
+        return uuid;
+    },
+    _send : function (page, params) {
+        try {
+            if(page == 'order') {
+                this._addCookie('oid', this._createUUID(), this._makeExpiresDate(1));
+            }
+            var ds = document.getElementById('data_div');
+            var data = {
+                mid : ds.dataset.memberno,
+                customer : ds.dataset.customerno || 0,
+                uuid : this._getUUID(),
+                oid : this._getCookie('oid'),
+                event : 'breadcrumb',
+                page : page || ds.nowpage,
+                device : this._device()
+            }
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", "https://trace.sixshoptest.com", true);
+            xhr.setRequestHeader( 'Content-Type', 'application/json');
+            xhr.send(JSON.stringify(data));
+        } catch (e) {
+            console.log(e);
+        }
+    },
+    _device : function () {
+        var ua = navigator.userAgent;
+        if (/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i.test(ua)) {
+            return "tablet";
+        }
+        if (/Mobile|iP(hone|od|ad)|Android|BlackBerry|IEMobile|Kindle|Silk-Accelerated|(hpw|web)OS|Opera M(obi|ini)/.test(ua)) {
+            return "mobile";
+        }
+        return "desktop";
+    },
+    purchase : function (data) {
+        var self = this;
+        var ds = document.getElementById('data_div');
+        data.mid = ds.dataset.memberno;
+        data.cid = ds.dataset.customerno || 0;
+        data.uuid = self._getUUID();
+        data.sessionId = self._getSession();
+        data.orderId = self._getCookie("oid");
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", "https://trace.sixshoptest.com/purchase", true);
+        xhr.setRequestHeader( 'Content-Type', 'application/json');
+        xhr.send(JSON.stringify(data));
+    },
+    addDomContentLoadedEvents : function () {
+        try {
+            var self = this;
+            document.addEventListener('DOMContentLoaded', function () {
+
+                var host = location.protocol + "//" + location.host;
+                var ds = document.getElementById('data_div');
+
+                var data = {
+                    mid : ds.dataset.memberno,
+                    cid : ds.dataset.customerno || 0,
+                    uuid : self._getUUID(),
+                    sessionId : self._getSession(),
+                    host : location.hostname,
+                    path : location.href.replace(host, "")
+                }
+                var referrer = document.referrer;
+                if(referrer.indexOf(host) !== 0
+                    && self._getCookie("funnel") !== referrer
+                    && referrer.indexOf("nicepay.co.kr") < 0
+                    && referrer.indexOf("inicis.com") < 0
+                    && referrer.indexOf("kauth.kakao.com") < 0
+                    && referrer.indexOf("naver.com/oauth") < 0
+                ) {
+                    self._addCookie("funnel", referrer);
+                    data.funnel = self._getCookie("funnel");
+                }
+
+                var xhr = new XMLHttpRequest();
+                xhr.open("POST", "https://trace.sixshoptest.com/pick-up", true);
+                xhr.setRequestHeader( 'Content-Type', 'application/json');
+                xhr.send(JSON.stringify(data));
+            })
+        } catch (e) {
+            //nothing
+        }
+    },
+    order : function () {
+        this._send('order');
+    },
+    payment : function () {
+        this._send('payment')
+    },
+    success : function () {
+        this._send('success');
+    },
+    send : function (page) {
+        this._send(page);
+    },
+    conversion : function (event, target, reviewId, photoReview) {
+        try {
+            var ds = document.getElementById('data_div');
+            var data = {
+                mid : ds.dataset.memberno,
+                customer : ds.dataset.customerno || 0,
+                uuid : this._getUUID(),
+                sessionId : this._getSession(),
+                event : event,
+                target : target,
+                reviewId : reviewId,
+                photoReview : photoReview,
+                productId : ds.dataset.shopproductno || null,
+                device: this._device()
+            }
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", "https://trace.sixshoptest.com/conversion", true);
+            xhr.setRequestHeader( 'Content-Type', 'application/json');
+            xhr.send(JSON.stringify(data));
+        } catch (e) {
+            console.log(e);
+        }
+    }, addClickEvents: function() {
+        var self = this;
+        document.addEventListener("click", function(event) {
+            var target = event.currentTarget.activeElement;
+            var type = target.getAttribute("data-track-conversion-type");
+            if (type === "click") {
+                try {
+                    var ds = document.getElementById('data_div');
+                    var title = target.getAttribute("data-track-conversion-title") || "unknown";
+                    var data = {
+                        mid : ds.getAttribute("data-memberno") ||0,
+                        customer : ds.getAttribute("data-customerno") || 0,
+                        uuid : self._getUUID(),
+                        sessionId : self._getSession(),
+                        type : "click",
+                        title : title,
+                        properties : self._getTrackConversionDataString(target.attributes),
+                        page : window.location.href,
+                        ua: navigator.userAgent
+                    }
+                    var xhr = new XMLHttpRequest();
+                    xhr.open("POST", "https://trace.sixshoptest.com/track-conversion", true);
+                    xhr.setRequestHeader( 'Content-Type', 'application/json');
+                    xhr.send(JSON.stringify(data));
+                } catch (e) {
+                    console.log(e);
+                }
+            }
+        })
+    },
+    _getTrackConversionDataString : function (attributes) {
+        var properties = {};
+        for (var i = 0; i < attributes.length; i++) {
+            var attribute = attributes[i];
+            if(attribute.specified && attribute.name.indexOf("data-track-conversion-") != -1){
+                properties[attribute.name] = attribute.value;
+            }
+        }
+        return JSON.stringify(properties);
+    }
+}
+window.ssa = ssa;
+ssa.addClickEvents();
+ssa.addDomContentLoadedEvents();
+
